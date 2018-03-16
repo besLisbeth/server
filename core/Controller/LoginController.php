@@ -179,6 +179,9 @@ class LoginController extends Controller {
 						} catch (Exception $e) {
 							$this->logger->error('Error while setting user value: ' . $e);
 						}
+						if ($remember_login) {
+							$this->userSession->createRememberMeToken($userId);
+						}
 						return $this->generateRedirect($redirect_url);
 					}
 				}
