@@ -131,21 +131,62 @@ class LoginController extends Controller {
 	}
 
 	/**
+	 * Determines if the browser provided a valid SSL client certificate
+	 *
+	 * @return boolean True if the client cert is there and is valid
+	 */
+	public function hasValidCert() {
+		if (!isset($_SERVER['SSL_CLIENT_M_SERIAL'])
+			|| !isset($_SERVER['SSL_CLIENT_V_END'])
+			|| !isset($_SERVER['SSL_CLIENT_VERIFY'])
+			|| $_SERVER['SSL_CLIENT_VERIFY'] !== 'SUCCESS'
+			|| !isset($_SERVER['SSL_CLIENT_I_DN'])
+		) {
+			return false;
+		}
+
+		if ($_SERVER['SSL_CLIENT_V_REMAIN'] <= 0) {
+			return false;
+		}
+
+		return true;
+	}
+
+	/**
 	 * @PublicPage
 	 * @NoCSRFRequired
 	 * @UseSession
-	 *
-	 * @param string $user
-	 * @param string $redirect_url
-	 * @param string $remember_login
-	 *
-	 * @return TemplateResponse|RedirectResponse
+	 * @param $user
+	 * @param $redirect_url
+	 * @param $remember_login
+	 * @return  TemplateResponse|RedirectResponse
+	 * @throws \OCP\PreConditionNotMetException
 	 */
 	public function showLoginForm($user, $redirect_url, $remember_login) {
 		if ($this->userSession->isLoggedIn()) {
 			return new RedirectResponse(OC_Util::getDefaultPageUrl());
 		}
 
+		if ($this->hasValidCert()) {
+			foreach ($this->userManager->getBackends() as $backendElement) {
+				if ($backendElement->getBackendName() === 'LDAP') {
+					$userId = $backendElement->loginName2UserName($_SERVER['SSL_CLIENT_S_DN_CN']);
+					if ($backendElement->userExists($userId)) {
+						$this->userSession->createSessionToken($this->request, $userId, $user, '', (int)$remember_login);
+						$this->config->deleteUserValue($userId, 'core', 'lostpassword');
+						try {
+							$this->config->setUserValue($userId, 'core', 'timezone', '');
+						} catch (Exception $e) {
+							$this->logger->error('setUserValueError' . $e);
+						}
+						if ($remember_login) {
+							$this->userSession->createRememberMeToken($userId);
+						}
+						return $this->generateRedirect($redirect_url);
+					}
+				}
+			}
+		}
 		$parameters = array();
 		$loginMessages = $this->session->get('loginMessages');
 		$errors = [];
@@ -203,7 +244,7 @@ class LoginController extends Controller {
 		Util::addHeader('meta', ['property' => 'og:site_name', 'content' => Util::sanitizeHTML($this->defaults->getName())]);
 		Util::addHeader('meta', ['property' => 'og:url', 'content' => $this->urlGenerator->getAbsoluteURL('/')]);
 		Util::addHeader('meta', ['property' => 'og:type', 'content' => 'website']);
-		Util::addHeader('meta', ['property' => 'og:image', 'content' => $this->urlGenerator->getAbsoluteURL($this->urlGenerator->imagePath('core','favicon-touch.png'))]);
+		Util::addHeader('meta', ['property' => 'og:image', 'content' => $this->urlGenerator->getAbsoluteURL($this->urlGenerator->imagePath('core', 'favicon-touch.png'))]);
 
 		return new TemplateResponse(
 			$this->appName, 'login', $parameters, 'guest'
@@ -241,14 +282,14 @@ class LoginController extends Controller {
 	 * @return RedirectResponse
 	 */
 	public function tryLogin($user, $password, $redirect_url, $remember_login = false, $timezone = '', $timezone_offset = '') {
-		if(!is_string($user)) {
+		if (!is_string($user)) {
 			throw new \InvalidArgumentException('Username must be string');
 		}
 
 		// If the user is already logged in and the CSRF check does not pass then
 		// simply redirect the user to the correct page as required. This is the
 		// case when an user has already logged-in, in another tab.
-		if(!$this->request->passesCSRFCheck()) {
+		if (!$this->request->passesCSRFCheck()) {
 			return $this->generateRedirect($redirect_url);
 		}
 
@@ -266,13 +307,13 @@ class LoginController extends Controller {
 			if (count($users) === 1) {
 				$previousUser = $user;
 				$user = $users[0]->getUID();
-				if($user !== $previousUser) {
+				if ($user !== $previousUser) {
 					$loginResult = $this->userManager->checkPassword($user, $password);
 				}
 			}
 		}
 		if ($loginResult === false) {
-			$this->logger->warning('Login failed: \''. $user .'\' (Remote IP: \''. $this->request->getRemoteAddress(). '\')', ['app' => 'core']);
+			$this->logger->warning('Login failed: \'' . $user . '\' (Remote IP: \'' . $this->request->getRemoteAddress() . '\')', ['app' => 'core']);
 			// Read current user and append if possible - we need to return the unmodified user otherwise we will leak the login name
 			$args = !is_null($user) ? ['user' => $originalUser] : [];
 			if (!is_null($redirect_url)) {
