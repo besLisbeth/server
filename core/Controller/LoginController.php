@@ -177,16 +177,14 @@ class LoginController extends Controller {
 						try {
 							$this->config->setUserValue($userId, 'core', 'timezone', '');
 						} catch (Exception $e) {
-							$this->logger->error('setUserValueError' . $e);
-						}
-						if ($remember_login) {
-							$this->userSession->createRememberMeToken($userId);
+							$this->logger->error('Error while setting user value: ' . $e);
 						}
 						return $this->generateRedirect($redirect_url);
 					}
 				}
 			}
 		}
+
 		$parameters = array();
 		$loginMessages = $this->session->get('loginMessages');
 		$errors = [];
